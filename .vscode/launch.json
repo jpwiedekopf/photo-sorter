@@ -8,10 +8,8 @@
             "console": "integratedTerminal",
             "justMyCode": true,
             "args": [
-                "-i=/Volumes/T7/DCIM/117_FUJI",
-                "-i=/Volumes/T7/test-in",
-                "-o=/Volumes/T7/out",
-                "-o=/Volumes/T7/out2"
+                "-i=/Volumes/T7/DCIM/116_FUJI",
+                "-o=/Volumes/T7/out"
             ],
             "env": {
                 "PYDEVD_DISABLE_FILE_VALIDATION": "1"
