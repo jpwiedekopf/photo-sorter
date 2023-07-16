@@ -127,8 +127,26 @@ def scan_output_dirs(args: argparse.Namespace, file_list: List[FoundFile]):
     year_dir_map = {}
     all_years = set([r.parent for r in required_output_dirs])
     if args.split_raw:
-        # TODO
-        raise NotImplementedError("Splitting RAW files is not yet implemented.")
+        for output_dir in [Path(o) for o in args.output]:
+            output_dir.joinpath(args.jpg_dir).mkdir(parents=True, exist_ok=True)
+            output_dir.joinpath(args.raw_dir).mkdir(parents=True, exist_ok=True)
+        for year in all_years:
+            for out_dir in [Path(o) for o in args.output]:
+                year_jpg = out_dir.joinpath(args.jpg_dir).joinpath(year)
+                if not year_jpg.exists():
+                    print(f"Creating directory {year_jpg}")
+                    year_jpg.mkdir(parents=False, exist_ok=False)
+                    year_dir_map[year_jpg] = []
+                else:
+                    year_dir_map[year_jpg] = list([f for f in year_jpg.iterdir() if f.is_dir()])
+                year_raw = out_dir.joinpath(args.raw_dir).joinpath(year)
+                if not year_raw.exists():
+                    print(f"Creating directory {year_raw}")
+                    year_raw.mkdir(parents=False, exist_ok=False)
+                    year_dir_map[year_raw] = []
+                else:
+                    year_dir_map[year_raw] = list([f for f in year_raw.iterdir() if f.is_dir()])
+
     else:
         for year in all_years:
             if args.split_raw:
@@ -154,10 +172,16 @@ def scan_output_dirs(args: argparse.Namespace, file_list: List[FoundFile]):
 
     dir_tqdm = tqdm(required_output_dirs)
     dir_tqdm.write("Scanning output directories")
-    out_basedirs = list(Path(o) for o in args.output)
-    new_filelist: List[FoundFile] = []
+    if not args.split_raw:
+        out_basedirs = list(Path(o) for o in args.output)
+    else:
+        out_basedirs = []
+        for o in [Path(o) for o in args.output]:
+            out_basedirs.append(o.joinpath(args.jpg_dir))
+            out_basedirs.append(o.joinpath(args.raw_dir))
     for required_dir in dir_tqdm:
         year = required_dir.parent
+        
         for out_dir in out_basedirs:
             year_dir = out_dir.joinpath(year)
             target_dir = out_dir.joinpath(required_dir)
@@ -172,34 +196,50 @@ def scan_output_dirs(args: argparse.Namespace, file_list: List[FoundFile]):
             else:
                 raise Exception(f"found multiple matching directories for {required_dir} in {year_dir}, please fix manually.")
 
+    return output_map
+
+def generate_copy_jobs(file_list: List[FoundFile], output_map: dict, args: argparse.Namespace):
     files_tqdm = tqdm(file_list)
     files_tqdm.write("Generating file copy jobs")
+    jobs = []
+    if not args.split_raw:
+        out_basedirs = list(Path(o) for o in args.output)
+    else:
+        out_jpgdirs = [Path(o).joinpath(args.jpg_dir) for o in args.output]
+        out_rawdirs = [Path(o).joinpath(args.raw_dir) for o in args.output]
     for file in files_tqdm:
-        copy_to_dirs = []
-        for out_dir in out_basedirs:
-            requested_output_dir = out_dir.joinpath(file.target_directory)
-            copy_to_dirs.append(output_map.get(requested_output_dir))
+
+        if args.split_raw:
+            copy_to_jpg = [output_map[o.joinpath(file.target_directory)] for o in out_jpgdirs]
+            copy_to_raw = [output_map[o.joinpath(file.target_directory)] for o in out_rawdirs]
+        else:
+            copy_to_jpg = [o.joinpath(file.target_directory) for o in out_basedirs]
+            copy_to_raw = [o.joinpath(file.target_directory) for o in out_basedirs]
+            
         copy_jpg = None
         copy_raw = None
-        for target_dir in copy_to_dirs:
+        for target_dir in copy_to_jpg:
             if args.rename_files:
                 if file.original_jpg_path is not None:
-                    copy_jpg = f"{file.datetime.strftime('%Y-%m-%d_%H-%M-%S')}-{file.original_jpg_path.name}"
+                    copy_jpg = f"{file.datetime.strftime('%Y%m%d%H%M%S')}-{file.original_jpg_path.name}"
                     file.copy_jpg.append(target_dir.joinpath(copy_jpg))
-                if file.original_raw_path is not None:
-                    copy_raw = f"{file.datetime.strftime('%Y-%m-%d_%H-%M-%S')}-{file.original_raw_path.name}"
-                    file.copy_raw.append(target_dir.joinpath(copy_raw))
             else:
                 if file.original_jpg_path is not None:
                     copy_jpg = file.original_jpg_path.name
                     file.copy_jpg.append(target_dir.joinpath(copy_jpg))
+        for target_dir in copy_to_raw:
+            if args.rename_files:
+                if file.original_raw_path is not None:
+                    copy_raw = f"{file.datetime.strftime('%Y%m%d%H%M%S')}-{file.original_raw_path.name}"
+                    file.copy_raw.append(target_dir.joinpath(copy_raw))
+            else:
                 if file.original_raw_path is not None:
                     copy_raw = file.original_raw_path.name
                     file.copy_raw.append(target_dir.joinpath(copy_raw))
 
-        new_filelist.append(file)
+        jobs.append(file)
 
-    return new_filelist
+    return jobs
 
 def copy_files(filelist: List[FoundFile]):
     job_tqdm = tqdm(filelist)
@@ -212,11 +252,13 @@ def copy_files(filelist: List[FoundFile]):
                 job_tqdm.write(f"Skipping {target_jpg}, already exists")
             else:
                 copyfile(job.original_jpg_path, target_jpg)
-        for raw in job.copy_raw:
-            if raw.exists():
-                skipped_files.append(raw)
+                job_tqdm.write(f"{job.original_jpg_path} -> {target_jpg}")
+        for target_raw in job.copy_raw:
+            if target_raw.exists():
+                skipped_files.append(target_raw)
             else:
-                copyfile(job.original_raw_path, raw)
+                copyfile(job.original_raw_path, target_raw)
+                job_tqdm.write(f"{job.original_raw_path} -> {target_raw}")
     
     if len(skipped_files) > 0:
         print("Skipped files:", file=stderr)
@@ -228,6 +270,7 @@ if __name__ == "__main__":
     args = parse_args()
     (jpg_list, raw_list) = scan_input_dirs(args)
     file_list = gather_files(jpg_list, raw_list)
-    copy_jobs = scan_output_dirs(args, file_list)
+    output_map = scan_output_dirs(args, file_list)
+    copy_jobs = generate_copy_jobs(file_list, output_map, args)
     copy_files(copy_jobs)
     print("Done.")
