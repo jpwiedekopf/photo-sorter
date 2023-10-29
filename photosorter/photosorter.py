@@ -73,7 +73,7 @@ def scan_input_dirs(args: argparse.Namespace):
         found_raw.extend(raw_list)
         found_raw.sort()
 
-    print(f"In total, found {len(found_jpg)} JPGs and {len(found_jpg)} RAWs")
+    print(f"In total, found {len(found_jpg)} JPGs and {len(found_raw)} RAWs")
     return (found_jpg, found_raw)
 
 def read_exif_datetime(path: Path) -> datetime:
